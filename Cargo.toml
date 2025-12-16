@@ -3,7 +3,7 @@ members = [".", "macros", "codesign-run"]
 resolver = "2"
 
 [workspace.dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
 dispatch = "0.2"
 proc-macro2 = "1"
 quote = "1"

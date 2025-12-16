@@ -24,42 +24,52 @@ Apple frameworks often require:
 
 These requirements conflict with `#[tokio::main]`, which takes ownership of the main thread for async execution.
 
-## Solution
+## ⚠️ Critical: Why `#[tokio::main]` Doesn't Work
 
-`apple-main` provides two approaches:
-
-### Option 1: Dispatch Helpers (Recommended for headless use)
-
-Use standard `#[tokio::main]` and dispatch specific calls to the main thread:
+**`#[tokio::main]` will cause `on_main()` to hang on macOS.** Here's why:
 
 ```rust
-use apple_main::on_main;
-
-#[tokio::main]
+#[tokio::main]  // ❌ DON'T DO THIS for Apple framework code
 async fn main() {
-    // This closure runs on the main thread via GCD
-    let config = on_main(|| {
+    // This will HANG forever on macOS!
+    let config = on_main(|| VZVirtualMachineConfiguration::new()).await;
+}
+```
+
+The `on_main()` function dispatches work to the main dispatch queue via GCD. But someone needs to **drain that queue** - typically CFRunLoop. With `#[tokio::main]`, tokio owns the main thread and the main queue never gets drained.
+
+**Always use `#[apple_main::main]` when your code uses `on_main()`:**
+
+```rust
+#[apple_main::main]  // ✅ CORRECT
+async fn main() {
+    // This works! CFRunLoop runs on main thread, draining the queue
+    let config = on_main(|| VZVirtualMachineConfiguration::new()).await;
+}
+```
+
+## Solution
+
+```rust
+#[apple_main::main]
+async fn main() {
+    // Your async code runs on tokio worker threads
+    // Main thread runs CFRunLoop, available for Apple APIs via on_main()
+
+    let config = apple_main::on_main(|| {
         VZVirtualMachineConfiguration::new()
     }).await;
 
-    // Back on tokio worker threads
     println!("VM configured!");
 }
 ```
 
-### Option 2: Main Thread Macro (For GUI or CFRunLoop-dependent code)
+On macOS, this:
+1. Spawns your async code on the tokio runtime (background threads)
+2. Runs CFRunLoop on the main thread
+3. `on_main()` dispatches closures to the main thread and awaits completion
 
-When you need the main thread to run CFRunLoop:
-
-```rust
-use apple_main::main;
-
-#[apple_main::main]
-async fn main() {
-    // Your async code runs on tokio
-    // Main thread is available for Apple APIs via on_main()
-}
-```
+On other platforms, `#[apple_main::main]` is equivalent to `#[tokio::main]`.
 
 ## Installation
 
@@ -153,11 +163,13 @@ The crate includes common entitlement files in `entitlements/`:
 
 | Use Case | Approach |
 |----------|----------|
-| Headless VM server | `#[tokio::main]` + `on_main()` |
-| CLI tool managing VMs | `#[tokio::main]` + `on_main()` |
-| gRPC/HTTP service | `#[tokio::main]` + `on_main()` |
+| Any code using `on_main()` | `#[apple_main::main]` |
+| Headless VM server | `#[apple_main::main]` |
+| CLI tool managing VMs | `#[apple_main::main]` |
 | Desktop app with GUI | `#[apple_main::main]` |
-| VZVirtualMachineView | `#[apple_main::main]` |
+| Code that doesn't need main thread | `#[tokio::main]` (standard tokio) |
+
+**Rule of thumb:** If your code touches Apple frameworks that require the main thread (Virtualization.framework, AppKit, etc.), use `#[apple_main::main]`.
 
 ## Before & After: Cross-Platform VM Code
 
@@ -203,125 +215,32 @@ On macOS, this dispatches to the main thread via GCD. On other platforms, it exe
 
 ## Testing
 
-### Option 1: Standard tokio tests (Recommended)
+### ⚠️ `#[tokio::test]` Won't Work
 
-For most cases, use `#[tokio::test]` with `on_main()`:
+Just like `#[tokio::main]`, **`#[tokio::test]` will hang** when using `on_main()`:
 
 ```rust
-#[tokio::test]
+#[tokio::test]  // ❌ Will HANG on macOS!
 async fn test_vm_creation() {
     let config = apple_main::on_main(|| {
         VZVirtualMachineConfiguration::new()
     }).await;
-
-    assert!(config.is_valid());
 }
 ```
 
-### Option 2: apple_main::test macro
+### Solution: Custom Test Harness
 
-For tests that need the shared runtime:
-
-```rust
-#[apple_main::test]
-async fn test_with_shared_runtime() {
-    // Uses apple_main::init_runtime() and block_on()
-    let result = some_async_operation().await;
-    assert!(result.is_ok());
-}
-```
-
-### Important: Main Thread Limitations in Tests
-
-Cargo's test harness runs tests on worker threads, not the main thread. This means:
-
-- `on_main_sync()` will **hang** on macOS in tests (no active main dispatch queue)
-- `on_main()` async version also requires the main queue to be drained
-
-**Solution:** Use `#[apple_main::harness_test]` with `test_main!()` for tests that truly need the main thread. See the "Custom Test Harness" section below.
-
-## Benchmarking
-
-### With Criterion (Recommended)
-
-Criterion works seamlessly with the `codesign-run` runner:
-
-```toml
-# Cargo.toml
-[dev-dependencies]
-criterion = "0.5"
-
-[[bench]]
-name = "vm_bench"
-harness = false
-```
-
-```rust
-// benches/vm_bench.rs
-use criterion::{criterion_group, criterion_main, Criterion};
-
-fn vm_benchmark(c: &mut Criterion) {
-    c.bench_function("vm_create", |b| {
-        b.iter(|| {
-            apple_main::on_main_sync(|| {
-                VZVirtualMachineConfiguration::new()
-            })
-        })
-    });
-}
-
-criterion_group!(benches, vm_benchmark);
-criterion_main!(benches);
-```
-
-Run benchmarks (automatically signed via codesign-run):
-
-```bash
-cargo bench
-```
-
-### With Divan
-
-```toml
-[dev-dependencies]
-divan = "0.1"
-
-[[bench]]
-name = "vm_bench"
-harness = false
-```
-
-```rust
-// benches/vm_bench.rs
-use divan::Bencher;
-
-#[divan::bench]
-fn vm_create(bencher: Bencher) {
-    bencher.bench(|| {
-        apple_main::on_main_sync(|| {
-            VZVirtualMachineConfiguration::new()
-        })
-    });
-}
-
-fn main() {
-    divan::main();
-}
-```
-
-## Custom Test Harness (Advanced)
-
-For tests that truly require an active main runloop on macOS, use the custom test harness:
+For tests that use `on_main()`, use `#[apple_main::harness_test]` with `harness = false`:
 
 ```toml
 # Cargo.toml
 [[test]]
-name = "macos_integration"
+name = "vm_tests"
 harness = false
 ```
 
 ```rust
-// tests/macos_integration.rs
+// tests/vm_tests.rs
 #[apple_main::harness_test]
 async fn test_vm_creation() {
     let config = apple_main::on_main(|| {
@@ -331,17 +250,135 @@ async fn test_vm_creation() {
 }
 
 #[apple_main::harness_test]
-async fn test_vm_startup() {
-    // Another test using the same harness
+async fn test_vm_boot() {
+    // Another test
 }
 
 apple_main::test_main!();
 ```
 
-The `test_main!()` macro generates a main function that:
-1. Collects all `#[harness_test]` functions via `inventory`
-2. Runs them using `libtest-mimic` with proper argument parsing
-3. Supports all standard test flags (`--filter`, `--nocapture`, etc.)
+The `test_main!()` macro:
+1. Runs CFRunLoop on the main thread (so `on_main()` works)
+2. Executes tests on the tokio runtime
+3. Uses `libtest-mimic` for standard test output (`--filter`, `--nocapture`, etc.)
+
+### Tests That Don't Need Main Thread
+
+For code that doesn't use `on_main()`, standard `#[tokio::test]` works fine:
+
+```rust
+#[tokio::test]
+async fn test_config_parsing() {
+    // No on_main() here - just regular async code
+    let config = parse_config("test.yaml").await;
+    assert!(config.is_ok());
+}
+```
+
+## Benchmarking
+
+Benchmarks need CFRunLoop just like tests. Use `#[apple_main::main]` for your benchmark main:
+
+```toml
+# Cargo.toml
+[[bench]]
+name = "vm_bench"
+harness = false
+```
+
+```rust
+// benches/vm_bench.rs
+use std::time::Instant;
+
+#[apple_main::main]
+async fn main() {
+    println!("Running VM benchmarks...\n");
+
+    let iterations = 10;
+    let mut times = Vec::with_capacity(iterations);
+
+    for i in 0..iterations {
+        let start = Instant::now();
+
+        let _config = apple_main::on_main(|| {
+            VZVirtualMachineConfiguration::new()
+        }).await;
+
+        times.push(start.elapsed());
+        println!("  iteration {}: {:?}", i + 1, times.last().unwrap());
+    }
+
+    let total: std::time::Duration = times.iter().sum();
+    let mean = total / iterations as u32;
+    println!("\nMean: {:?}", mean);
+
+    std::process::exit(0);
+}
+```
+
+For Criterion/Divan, you'll need to integrate with their APIs while ensuring CFRunLoop runs. See the examples directory for patterns.
+
+## Library Integration
+
+If you're building a library (like a VM abstraction layer) that supports multiple backends including Apple's Virtualization.framework, here's the recommended pattern:
+
+### Expose Async Traits
+
+```rust
+#[async_trait]
+pub trait VmBackend: Send + Sync {
+    async fn create_vm(&self, config: &VmConfig) -> Result<Box<dyn VmHandle>>;
+}
+```
+
+### Implement with `on_main()` for Apple Backend
+
+```rust
+pub struct AppleVirtualizationBackend;
+
+#[async_trait]
+impl VmBackend for AppleVirtualizationBackend {
+    async fn create_vm(&self, config: &VmConfig) -> Result<Box<dyn VmHandle>> {
+        // Dispatch the Apple API calls to main thread
+        let vm = apple_main::on_main(move || {
+            let vz_config = VZVirtualMachineConfiguration::new();
+            vz_config.set_cpu_count(config.cpus);
+            vz_config.set_memory_size(config.memory);
+            VZVirtualMachine::new(vz_config)
+        }).await;
+
+        Ok(Box::new(AppleVmHandle::new(vm)))
+    }
+}
+```
+
+### Document the Runtime Requirement
+
+Your library's README should note:
+
+> **macOS with native backend requires `#[apple_main::main]`**
+>
+> ```rust
+> #[apple_main::main]  // Required for native Virtualization.framework
+> async fn main() {
+>     let backend = select_backend();  // Returns AppleVirtualizationBackend on macOS
+>     let vm = backend.create_vm(&config).await?;
+> }
+> ```
+
+### Cross-Platform Considerations
+
+The beauty of this pattern is that `on_main()` is a no-op on non-Apple platforms:
+
+```rust
+// This same code works everywhere:
+// - macOS: dispatches to main thread
+// - Linux/Windows: executes inline
+
+let vm = apple_main::on_main(|| create_vm()).await;
+```
+
+Your library consumers write the same code regardless of platform. The only difference is using `#[apple_main::main]` instead of `#[tokio::main]` - which is also a no-op on non-Apple platforms.
 
 ## License
 
