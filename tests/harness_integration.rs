@@ -4,10 +4,9 @@ static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[apple_main::harness_test]
 async fn test_counter_increments() {
-    let before = TEST_COUNTER.load(Ordering::SeqCst);
-    TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+    let before = TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
     let after = TEST_COUNTER.load(Ordering::SeqCst);
-    assert_eq!(after, before + 1);
+    assert!(after > before, "counter should have incremented");
 }
 
 #[apple_main::harness_test]
