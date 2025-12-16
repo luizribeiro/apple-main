@@ -1,0 +1,28 @@
+[workspace]
+members = [".", "macros", "codesign-run"]
+resolver = "2"
+
+[workspace.dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros"] }
+dispatch = "0.2"
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+[package]
+name = "apple-main"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Seamlessly integrate async Rust (tokio) with Apple's main-thread-bound frameworks"
+keywords = ["apple", "macos", "tokio", "virtualization", "async"]
+categories = ["asynchronous", "os::macos-apis"]
+
+[dependencies]
+tokio = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+dispatch = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
