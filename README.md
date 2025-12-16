@@ -281,12 +281,12 @@ Benchmarks need CFRunLoop running on the main thread, just like tests and applic
 
 ### With Criterion
 
-Criterion's `criterion_main!` macro generates its own `main()`, which conflicts with our need for CFRunLoop. The solution is to write a custom main that runs CFRunLoop on the main thread while Criterion runs on a background thread:
+Enable the `criterion` feature and use `apple_main::criterion_main!` instead of Criterion's `criterion_main!`:
 
 ```toml
 # Cargo.toml
 [dev-dependencies]
-criterion = "0.5"
+apple-main = { version = "0.1", features = ["criterion"] }
 
 [[bench]]
 name = "vm_bench"
@@ -295,12 +295,11 @@ harness = false
 
 ```rust
 // benches/vm_bench.rs
-use criterion::{criterion_group, Criterion};
+use apple_main::criterion::{criterion_group, Criterion};
 
 fn vm_benchmark(c: &mut Criterion) {
     c.bench_function("vm_create", |b| {
         b.iter(|| {
-            // on_main_sync works because CFRunLoop is draining main queue
             apple_main::on_main_sync(|| {
                 VZVirtualMachineConfiguration::new()
             })
@@ -309,47 +308,7 @@ fn vm_benchmark(c: &mut Criterion) {
 }
 
 criterion_group!(benches, vm_benchmark);
-
-// Custom main instead of criterion_main!(benches)
-fn main() {
-    #[cfg(target_os = "macos")]
-    {
-        use std::time::Duration;
-
-        // Spawn Criterion on background thread
-        std::thread::spawn(|| {
-            // Wait for main runloop to start
-            std::thread::sleep(Duration::from_millis(100));
-
-            // Run benchmarks
-            benches();
-            criterion::Criterion::default().final_summary();
-
-            // Stop main runloop when done
-            dispatch::Queue::main().exec_async(|| {
-                core_foundation::runloop::CFRunLoop::get_current().stop();
-            });
-        });
-
-        // Main thread runs CFRunLoop (drains dispatch queue)
-        core_foundation::runloop::CFRunLoop::run_current();
-    }
-
-    #[cfg(not(target_os = "macos"))]
-    {
-        // On other platforms, just run Criterion normally
-        benches();
-        criterion::Criterion::default().final_summary();
-    }
-}
-```
-
-Add the required dependencies for macOS:
-
-```toml
-[target.'cfg(target_os = "macos")'.dev-dependencies]
-dispatch = "0.2"
-core-foundation = "0.10"
+apple_main::criterion_main!(benches);  // Use apple_main's version!
 ```
 
 Run benchmarks (automatically signed via codesign-run):
@@ -358,13 +317,21 @@ Run benchmarks (automatically signed via codesign-run):
 cargo bench
 ```
 
-### With Divan
+The `apple_main::criterion_main!` macro handles the CFRunLoop setup automatically:
+- On macOS: Runs CFRunLoop on main thread, Criterion on background thread
+- On other platforms: Runs Criterion normally
 
-Divan uses a regular `fn main()`, making integration simpler:
+### With Divan (Manual Setup)
+
+Divan doesn't have built-in apple-main support yet, so manual setup is required:
 
 ```toml
 [dev-dependencies]
 divan = "0.1"
+
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+dispatch = "0.2"
+core-foundation = "0.10"
 
 [[bench]]
 name = "vm_bench"

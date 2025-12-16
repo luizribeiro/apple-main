@@ -20,14 +20,20 @@ description = "Seamlessly integrate async Rust (tokio) with Apple's main-thread-
 keywords = ["apple", "macos", "tokio", "virtualization", "async"]
 categories = ["asynchronous", "os::macos-apis"]
 
+[features]
+default = []
+criterion = ["dep:criterion"]
+
 [dependencies]
 tokio = { workspace = true }
 apple-main-macros = { path = "macros" }
 inventory = { workspace = true }
 libtest-mimic = { workspace = true }
+criterion = { version = "0.5", optional = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 dispatch = { workspace = true }
+core-foundation = "0.10"
 
 [dev-dependencies]
 tokio = { workspace = true }

@@ -31,6 +31,9 @@ pub use platform::other::is_main_thread;
 pub use inventory;
 pub use libtest_mimic;
 
+#[cfg(feature = "criterion")]
+pub use criterion;
+
 #[doc(hidden)]
 pub mod __internal {
     #[cfg(target_os = "macos")]
@@ -78,6 +81,67 @@ macro_rules! test_main {
     () => {
         fn main() {
             $crate::run_tests();
+        }
+    };
+}
+
+/// Macro to generate a main function for Criterion benchmarks.
+///
+/// This replaces `criterion_main!` and handles CFRunLoop setup on macOS
+/// so that `on_main_sync()` works correctly in benchmarks.
+///
+/// # Example
+///
+/// ```ignore
+/// use apple_main::criterion::{criterion_group, Criterion};
+///
+/// fn vm_benchmark(c: &mut Criterion) {
+///     c.bench_function("vm_create", |b| {
+///         b.iter(|| {
+///             apple_main::on_main_sync(|| {
+///                 VZVirtualMachineConfiguration::new()
+///             })
+///         })
+///     });
+/// }
+///
+/// criterion_group!(benches, vm_benchmark);
+/// apple_main::criterion_main!(benches);
+/// ```
+#[cfg(feature = "criterion")]
+#[macro_export]
+macro_rules! criterion_main {
+    ($($group:path),+ $(,)?) => {
+        fn main() {
+            #[cfg(target_os = "macos")]
+            {
+                // Spawn Criterion on background thread
+                ::std::thread::spawn(|| {
+                    // Wait for main runloop to start
+                    ::std::thread::sleep(::std::time::Duration::from_millis(100));
+
+                    // Run benchmark groups
+                    $($group();)+
+
+                    // Final summary
+                    $crate::criterion::Criterion::default().final_summary();
+
+                    // Stop main runloop when done
+                    ::dispatch::Queue::main().exec_async(|| {
+                        ::core_foundation::runloop::CFRunLoop::get_current().stop();
+                    });
+                });
+
+                // Main thread runs CFRunLoop (drains dispatch queue)
+                ::core_foundation::runloop::CFRunLoop::run_current();
+            }
+
+            #[cfg(not(target_os = "macos"))]
+            {
+                // On other platforms, just run Criterion normally
+                $($group();)+
+                $crate::criterion::Criterion::default().final_summary();
+            }
         }
     };
 }

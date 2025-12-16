@@ -3,14 +3,17 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 static TEST_COUNTER: AtomicUsize = AtomicUsize::new(0);
 
 #[apple_main::harness_test]
-async fn test_first() {
+async fn test_counter_increments() {
+    let before = TEST_COUNTER.load(Ordering::SeqCst);
     TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-    assert_eq!(TEST_COUNTER.load(Ordering::SeqCst), 1);
+    let after = TEST_COUNTER.load(Ordering::SeqCst);
+    assert_eq!(after, before + 1);
 }
 
 #[apple_main::harness_test]
-async fn test_second() {
+async fn test_multiple_tests_run() {
     TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
+    // Just verify this test runs - counter value depends on test order
 }
 
 #[apple_main::harness_test]
