@@ -13,7 +13,7 @@ syn = { version = "2", features = ["full"] }
 name = "apple-main"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
+license = "MIT"
 description = "Seamlessly integrate async Rust (tokio) with Apple's main-thread-bound frameworks"
 keywords = ["apple", "macos", "tokio", "virtualization", "async"]
 categories = ["asynchronous", "os::macos-apis"]
