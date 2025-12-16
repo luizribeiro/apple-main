@@ -9,3 +9,22 @@ pub fn is_main_thread() -> bool {
 extern "C" {
     fn pthread_main_np() -> std::ffi::c_int;
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn is_main_thread_returns_false_on_spawned_thread() {
+        let handle = std::thread::spawn(is_main_thread);
+        let result = handle.join().unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn is_main_thread_returns_false_in_test_harness() {
+        // Cargo test runs tests on worker threads, not the main thread
+        // This verifies the function correctly reports we're not on main
+        assert!(!is_main_thread());
+    }
+}
