@@ -146,6 +146,142 @@ The crate includes common entitlement files in `entitlements/`:
 | Desktop app with GUI | `#[apple_main::main]` |
 | VZVirtualMachineView | `#[apple_main::main]` |
 
+## Testing
+
+### Option 1: Standard tokio tests (Recommended)
+
+For most cases, use `#[tokio::test]` with `on_main()`:
+
+```rust
+#[tokio::test]
+async fn test_vm_creation() {
+    let config = apple_main::on_main(|| {
+        VZVirtualMachineConfiguration::new()
+    }).await;
+
+    assert!(config.is_valid());
+}
+```
+
+### Option 2: apple_main::test macro
+
+For tests that need the shared runtime:
+
+```rust
+#[apple_main::test]
+async fn test_with_shared_runtime() {
+    // Uses apple_main::init_runtime() and block_on()
+    let result = some_async_operation().await;
+    assert!(result.is_ok());
+}
+```
+
+### Important: Main Thread Limitations in Tests
+
+Cargo's test harness runs tests on worker threads, not the main thread. This means:
+
+- `on_main_sync()` will **hang** on macOS in tests (no active main dispatch queue)
+- `on_main()` async version also requires the main queue to be drained
+
+**Workaround for macOS tests that need main thread:**
+
+For code that truly requires the main thread with an active runloop, you need
+integration tests with `harness = false` that set up their own main loop:
+
+```toml
+# Cargo.toml
+[[test]]
+name = "macos_integration"
+harness = false
+```
+
+```rust
+// tests/macos_integration.rs
+fn main() {
+    // Set up your own test runner with CFRunLoop
+    // This is an advanced use case
+}
+```
+
+## Benchmarking
+
+### With Criterion (Recommended)
+
+Criterion works seamlessly with the `codesign-run` runner:
+
+```toml
+# Cargo.toml
+[dev-dependencies]
+criterion = "0.5"
+
+[[bench]]
+name = "vm_bench"
+harness = false
+```
+
+```rust
+// benches/vm_bench.rs
+use criterion::{criterion_group, criterion_main, Criterion};
+
+fn vm_benchmark(c: &mut Criterion) {
+    c.bench_function("vm_create", |b| {
+        b.iter(|| {
+            apple_main::on_main_sync(|| {
+                VZVirtualMachineConfiguration::new()
+            })
+        })
+    });
+}
+
+criterion_group!(benches, vm_benchmark);
+criterion_main!(benches);
+```
+
+Run benchmarks (automatically signed via codesign-run):
+
+```bash
+cargo bench
+```
+
+### With Divan
+
+```toml
+[dev-dependencies]
+divan = "0.1"
+
+[[bench]]
+name = "vm_bench"
+harness = false
+```
+
+```rust
+// benches/vm_bench.rs
+use divan::Bencher;
+
+#[divan::bench]
+fn vm_create(bencher: Bencher) {
+    bencher.bench(|| {
+        apple_main::on_main_sync(|| {
+            VZVirtualMachineConfiguration::new()
+        })
+    });
+}
+
+fn main() {
+    divan::main();
+}
+```
+
+## Not Yet Implemented
+
+The following features from the design are not yet implemented:
+
+- `#[apple_main::test_module]` - Module-level test attribute
+- `apple_main::test_main!()` - Custom test harness macro
+- `inventory` + `libtest-mimic` based custom test harness for CFRunLoop-dependent tests
+
+For now, tests requiring an active main runloop need manual setup with `harness = false`.
+
 ## License
 
 MIT License
