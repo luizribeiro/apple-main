@@ -2,6 +2,19 @@
 
 Seamlessly integrate async Rust (tokio) with Apple's main-thread-bound frameworks like Virtualization.framework and AppKit.
 
+## Cross-Platform by Design
+
+**Write once, run everywhere.** All `apple-main` APIs work transparently on non-Apple platforms:
+
+| API | macOS | Linux/Windows |
+|-----|-------|---------------|
+| `on_main()` | Dispatches to main thread via GCD | Executes inline |
+| `on_main_sync()` | Blocks until main thread completes | Executes inline |
+| `is_main_thread()` | Checks via pthread | Always returns `true` |
+| `#[apple_main::main]` | Runs CFRunLoop on main | Standard `#[tokio::main]` |
+
+This means your cross-platform code "just works" everywhere without conditional compilation.
+
 ## The Problem
 
 Apple frameworks often require:
@@ -146,6 +159,48 @@ The crate includes common entitlement files in `entitlements/`:
 | Desktop app with GUI | `#[apple_main::main]` |
 | VZVirtualMachineView | `#[apple_main::main]` |
 
+## Before & After: Cross-Platform VM Code
+
+### Without apple-main (platform-specific)
+
+```rust
+// Requires #[cfg] everywhere and different code paths per platform
+#[cfg(target_os = "macos")]
+mod vm {
+    use dispatch::Queue;
+    use std::sync::mpsc;
+
+    pub fn create_vm_config() -> VZVirtualMachineConfiguration {
+        let (tx, rx) = mpsc::channel();
+        Queue::main().exec_async(move || {
+            let config = VZVirtualMachineConfiguration::new();
+            tx.send(config).unwrap();
+        });
+        rx.recv().unwrap()
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+mod vm {
+    pub fn create_vm_config() -> MockConfig {
+        MockConfig::new()  // Different API!
+    }
+}
+```
+
+### With apple-main (unified)
+
+```rust
+// Same code works on all platforms
+use apple_main::on_main;
+
+async fn create_vm_config() -> VZVirtualMachineConfiguration {
+    on_main(|| VZVirtualMachineConfiguration::new()).await
+}
+```
+
+On macOS, this dispatches to the main thread via GCD. On other platforms, it executes inline. No conditional compilation needed.
+
 ## Testing
 
 ### Option 1: Standard tokio tests (Recommended)
@@ -183,25 +238,7 @@ Cargo's test harness runs tests on worker threads, not the main thread. This mea
 - `on_main_sync()` will **hang** on macOS in tests (no active main dispatch queue)
 - `on_main()` async version also requires the main queue to be drained
 
-**Workaround for macOS tests that need main thread:**
-
-For code that truly requires the main thread with an active runloop, you need
-integration tests with `harness = false` that set up their own main loop:
-
-```toml
-# Cargo.toml
-[[test]]
-name = "macos_integration"
-harness = false
-```
-
-```rust
-// tests/macos_integration.rs
-fn main() {
-    // Set up your own test runner with CFRunLoop
-    // This is an advanced use case
-}
-```
+**Solution:** Use `#[apple_main::harness_test]` with `test_main!()` for tests that truly need the main thread. See the "Custom Test Harness" section below.
 
 ## Benchmarking
 
@@ -272,15 +309,39 @@ fn main() {
 }
 ```
 
-## Not Yet Implemented
+## Custom Test Harness (Advanced)
 
-The following features from the design are not yet implemented:
+For tests that truly require an active main runloop on macOS, use the custom test harness:
 
-- `#[apple_main::test_module]` - Module-level test attribute
-- `apple_main::test_main!()` - Custom test harness macro
-- `inventory` + `libtest-mimic` based custom test harness for CFRunLoop-dependent tests
+```toml
+# Cargo.toml
+[[test]]
+name = "macos_integration"
+harness = false
+```
 
-For now, tests requiring an active main runloop need manual setup with `harness = false`.
+```rust
+// tests/macos_integration.rs
+#[apple_main::harness_test]
+async fn test_vm_creation() {
+    let config = apple_main::on_main(|| {
+        VZVirtualMachineConfiguration::new()
+    }).await;
+    assert!(config.is_valid());
+}
+
+#[apple_main::harness_test]
+async fn test_vm_startup() {
+    // Another test using the same harness
+}
+
+apple_main::test_main!();
+```
+
+The `test_main!()` macro generates a main function that:
+1. Collects all `#[harness_test]` functions via `inventory`
+2. Runs them using `libtest-mimic` with proper argument parsing
+3. Supports all standard test flags (`--filter`, `--nocapture`, etc.)
 
 ## License
 
