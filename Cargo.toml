@@ -41,3 +41,8 @@ tokio = { workspace = true }
 [[test]]
 name = "harness_integration"
 harness = false
+
+[[bench]]
+name = "runtime_init"
+harness = false
+required-features = ["criterion"]

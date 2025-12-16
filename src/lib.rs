@@ -120,6 +120,9 @@ macro_rules! criterion_main {
                     // Wait for main runloop to start
                     ::std::thread::sleep(::std::time::Duration::from_millis(100));
 
+                    // Initialize tokio runtime for block_on() support
+                    $crate::init_runtime();
+
                     // Run benchmark groups
                     $($group();)+
 
@@ -138,6 +141,9 @@ macro_rules! criterion_main {
 
             #[cfg(not(target_os = "macos"))]
             {
+                // Initialize tokio runtime for block_on() support
+                $crate::init_runtime();
+
                 // On other platforms, just run Criterion normally
                 $($group();)+
                 $crate::criterion::Criterion::default().final_summary();
