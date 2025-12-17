@@ -30,7 +30,10 @@ pub fn main(_attr: TokenStream, item: TokenStream) -> TokenStream {
             #[cfg(target_os = "macos")]
             {
                 let rt = ::apple_main::init_runtime();
-                rt.spawn(async #fn_block);
+                rt.spawn(async {
+                    #fn_block
+                    ::apple_main::__internal::exit_main_loop(0);
+                });
                 ::apple_main::__internal::run_main_loop();
             }
 

@@ -34,4 +34,10 @@ async fn test_on_main_dispatch() {
     assert_eq!(result, 42);
 }
 
+#[apple_main::harness_test]
+async fn test_on_main_sync_dispatch() {
+    let result = apple_main::on_main_sync(|| 123);
+    assert_eq!(result, 123);
+}
+
 apple_main::test_main!();

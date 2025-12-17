@@ -13,6 +13,19 @@ fn block_on_runs_async_code() {
     assert_eq!(result, 42);
 }
 
+#[apple_main::test]
+async fn test_macro_runs_async_code() {
+    let result = async { 42 }.await;
+    assert_eq!(result, 42);
+}
+
+#[apple_main::test]
+async fn test_macro_with_spawn() {
+    let handle = tokio::spawn(async { 100 });
+    let result = handle.await.unwrap();
+    assert_eq!(result, 100);
+}
+
 #[cfg(not(target_os = "macos"))]
 mod non_macos {
     use super::*;
@@ -51,8 +64,6 @@ mod macos {
         assert!(!is_main);
     }
 
-    // NOTE: on_main_sync tests require a running main dispatch queue,
-    // which the test harness doesn't provide. These are tested via
-    // the unit tests in dispatch.rs that only verify compilation.
-    // Full integration testing requires an application with a runloop.
+    // NOTE: on_main() and on_main_sync() are tested in harness_integration.rs
+    // which uses the custom harness with CFRunLoop support.
 }

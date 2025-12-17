@@ -3,6 +3,69 @@
 //! This crate provides seamless integration between async Rust (tokio) and Apple's
 //! main-thread-bound frameworks like Virtualization.framework and AppKit.
 //!
+//! # Threading Model
+//!
+//! On macOS, many Apple frameworks require operations to run on the main thread.
+//! This crate handles the complexity by:
+//!
+//! - **Main thread**: Runs CFRunLoop, processing dispatch queue events
+//! - **Tokio threads**: Run your async code via `#[apple_main::main]` or `#[harness_test]`
+//! - **`on_main()`/`on_main_sync()`**: Dispatch closures to the main thread from tokio
+//!
+//! ```text
+//! ┌─────────────────┐     dispatch      ┌─────────────────┐
+//! │  Tokio Thread   │ ───────────────▶  │   Main Thread   │
+//! │  (your code)    │                   │   (CFRunLoop)   │
+//! │                 │ ◀───────────────  │                 │
+//! └─────────────────┘     result        └─────────────────┘
+//! ```
+//!
+//! # API Guide
+//!
+//! ## For Applications
+//!
+//! Use `#[apple_main::main]` for your entry point:
+//!
+//! ```ignore
+//! #[apple_main::main]
+//! async fn main() {
+//!     let config = apple_main::on_main(|| {
+//!         VZVirtualMachineConfiguration::new()
+//!     }).await;
+//! }
+//! ```
+//!
+//! ## For Tests
+//!
+//! Use `#[apple_main::harness_test]` with a custom test harness:
+//!
+//! ```ignore
+//! // Cargo.toml: [[test]] name = "my_test" harness = false
+//!
+//! #[apple_main::harness_test]
+//! async fn test_vm() {
+//!     apple_main::on_main(|| { /* ... */ }).await;
+//! }
+//!
+//! apple_main::test_main!();
+//! ```
+//!
+//! ## For Framework Integration (Criterion, etc.)
+//!
+//! When integrating with frameworks that control the entry point, use the
+//! low-level APIs directly:
+//!
+//! ```ignore
+//! fn my_benchmark(c: &mut Criterion) {
+//!     // Runtime is auto-initialized by criterion_main!
+//!     apple_main::block_on(async {
+//!         apple_main::on_main(|| { /* ... */ }).await
+//!     });
+//! }
+//!
+//! apple_main::criterion_main!(benches);
+//! ```
+//!
 //! # Cross-Platform Support
 //!
 //! All APIs work transparently on non-Apple platforms:
@@ -48,6 +111,17 @@ pub mod __internal {
     }
 
     #[cfg(target_os = "macos")]
+    pub fn exit_main_loop(code: i32) -> ! {
+        ::dispatch::Queue::main().exec_async(move || {
+            ::std::process::exit(code);
+        });
+        // Block forever until the dispatch executes and exits
+        loop {
+            ::std::thread::park();
+        }
+    }
+
+    #[cfg(target_os = "macos")]
     #[link(name = "CoreFoundation", kind = "framework")]
     extern "C" {
         fn CFRunLoopRun();
@@ -56,6 +130,11 @@ pub mod __internal {
     #[cfg(not(target_os = "macos"))]
     pub fn run_main_loop() -> ! {
         panic!("run_main_loop should not be called on non-macOS platforms")
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    pub fn exit_main_loop(code: i32) -> ! {
+        ::std::process::exit(code);
     }
 }
 
@@ -115,10 +194,12 @@ macro_rules! criterion_main {
         fn main() {
             #[cfg(target_os = "macos")]
             {
+                let (tx, rx) = ::std::sync::mpsc::channel::<()>();
+
                 // Spawn Criterion on background thread
-                ::std::thread::spawn(|| {
+                ::std::thread::spawn(move || {
                     // Wait for main runloop to start
-                    ::std::thread::sleep(::std::time::Duration::from_millis(100));
+                    let _ = rx.recv();
 
                     // Initialize tokio runtime for block_on() support
                     $crate::init_runtime();
@@ -133,6 +214,11 @@ macro_rules! criterion_main {
                     ::dispatch::Queue::main().exec_async(|| {
                         ::core_foundation::runloop::CFRunLoop::get_current().stop();
                     });
+                });
+
+                // Signal background thread once runloop is processing
+                ::dispatch::Queue::main().exec_async(move || {
+                    let _ = tx.send(());
                 });
 
                 // Main thread runs CFRunLoop (drains dispatch queue)

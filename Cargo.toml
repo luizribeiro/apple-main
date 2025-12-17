@@ -42,6 +42,10 @@ tokio = { workspace = true }
 name = "harness_integration"
 harness = false
 
+[[test]]
+name = "main_macro"
+harness = false
+
 [[bench]]
 name = "runtime_init"
 harness = false

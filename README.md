@@ -28,6 +28,14 @@ The same problem affects `#[tokio::test]` - tests that need the main thread will
 
 `apple-main` provides `#[apple_main::main]` which runs CFRunLoop on the main thread while your async code runs on tokio:
 
+```text
+┌─────────────────┐     dispatch      ┌─────────────────┐
+│  Tokio Thread   │ ───────────────▶  │   Main Thread   │
+│  (your code)    │                   │   (CFRunLoop)   │
+│                 │ ◀───────────────  │                 │
+└─────────────────┘     result        └─────────────────┘
+```
+
 ```rust
 #[apple_main::main]
 async fn main() {
@@ -40,7 +48,6 @@ async fn main() {
     }).await;
 
     println!("VM configured!");
-    std::process::exit(0);
 }
 ```
 
@@ -156,7 +163,6 @@ async fn main() {
     }).await;
 
     // Continue with config...
-    std::process::exit(0);
 }
 ```
 
@@ -244,7 +250,9 @@ The `apple_main::criterion_main!` macro handles CFRunLoop setup automatically.
 
 ## Library Integration
 
-If you're building a library with multiple backends (e.g., QEMU, Virtualization.framework), use `on_main()` in the Apple backend implementation:
+If you're building a library with multiple backends (e.g., QEMU, Virtualization.framework), use `on_main()` in the Apple backend implementation.
+
+`on_main()` returns a `Send` future, so it works across `async_trait` boundaries:
 
 ```rust
 #[async_trait]
