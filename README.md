@@ -211,11 +211,6 @@ On nightly Rust, you can use the `unstable-test-framework` feature to eliminate 
 # Cargo.toml
 [dev-dependencies]
 apple-main = { version = "0.1", features = ["unstable-test-framework"] }
-
-[[test]]
-name = "vm_tests"
-required-features = ["unstable-test-framework"]
-# harness = true (default) - no need to disable!
 ```
 
 ```rust
@@ -234,7 +229,16 @@ async fn test_vm_creation() {
 // No test_main!() needed!
 ```
 
+Run with `cargo test --features unstable-test-framework`. Cargo auto-discovers test files in `tests/`, so no `[[test]]` entry is needed.
+
 This uses Rust's unstable `custom_test_frameworks` feature ([tracking issue](https://github.com/rust-lang/rust/issues/50297)) to let the compiler generate the test harness automatically.
+
+> **Note:** If your CI runs on both stable and nightly, use `required-features` to skip nightly-only tests on stable:
+> ```toml
+> [[test]]
+> name = "vm_tests"
+> required-features = ["unstable-test-framework"]
+> ```
 
 ### Tests That Don't Need Main Thread
 
