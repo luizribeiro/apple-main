@@ -56,6 +56,29 @@ pub fn run_tests() -> ! {
     libtest_mimic::run(&args, tests).exit();
 }
 
+/// Test runner for use with `#![test_runner(apple_main::test_runner)]`.
+///
+/// This enables the unstable `custom_test_frameworks` feature to eliminate
+/// the need for `test_main!()`. Tests are still discovered via inventory.
+///
+/// # Example
+///
+/// ```ignore
+/// // Requires nightly and the unstable-test-framework feature
+/// #![feature(custom_test_frameworks)]
+/// #![test_runner(apple_main::test_runner)]
+///
+/// #[apple_main::harness_test]
+/// async fn test_vm_creation() {
+///     let config = apple_main::on_main(|| { /* ... */ }).await;
+/// }
+/// // No test_main!() needed!
+/// ```
+#[cfg(feature = "unstable-test-framework")]
+pub fn test_runner(_tests: &[&()]) {
+    run_tests()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -203,6 +203,39 @@ The test harness:
 
 **On non-macOS platforms**, the harness runs tests normally without CFRunLoop overhead.
 
+### Nightly: Eliminating `test_main!()`
+
+On nightly Rust, you can use the `unstable-test-framework` feature to eliminate both `harness = false` and `test_main!()`:
+
+```toml
+# Cargo.toml
+[dev-dependencies]
+apple-main = { version = "0.1", features = ["unstable-test-framework"] }
+
+[[test]]
+name = "vm_tests"
+required-features = ["unstable-test-framework"]
+# harness = true (default) - no need to disable!
+```
+
+```rust
+// tests/vm_tests.rs
+#![feature(custom_test_frameworks)]
+#![test_runner(apple_main::test_runner)]
+
+#[apple_main::harness_test]
+async fn test_vm_creation() {
+    let config = apple_main::on_main(|| {
+        VZVirtualMachineConfiguration::new()
+    }).await;
+    assert!(config.validate().is_ok());
+}
+
+// No test_main!() needed!
+```
+
+This uses Rust's unstable `custom_test_frameworks` feature ([tracking issue](https://github.com/rust-lang/rust/issues/50297)) to let the compiler generate the test harness automatically.
+
 ### Tests That Don't Need Main Thread
 
 For tests that don't use `on_main()`, standard `#[tokio::test]` works:

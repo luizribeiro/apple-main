@@ -85,6 +85,9 @@ pub use dispatch::{on_main, on_main_sync};
 pub use runtime::{block_on, init_runtime, runtime};
 pub use test_harness::{run_tests, TestCase};
 
+#[cfg(feature = "unstable-test-framework")]
+pub use test_harness::test_runner;
+
 #[cfg(target_os = "macos")]
 pub use platform::apple::is_main_thread;
 

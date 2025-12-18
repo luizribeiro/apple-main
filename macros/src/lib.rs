@@ -107,12 +107,46 @@ pub fn test(_attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// apple_main::test_main!();
 /// ```
+///
+/// # With `unstable-test-framework` feature (nightly only)
+///
+/// When using the `unstable-test-framework` feature, you can eliminate
+/// `test_main!()` by using Rust's custom test frameworks:
+///
+/// ```ignore
+/// #![feature(custom_test_frameworks)]
+/// #![test_runner(apple_main::test_runner)]
+///
+/// #[apple_main::harness_test]
+/// async fn test_vm_creation() {
+///     // ...
+/// }
+/// // No test_main!() needed!
+/// ```
 #[proc_macro_attribute]
 pub fn harness_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
     let input = parse_macro_input!(item as ItemFn);
     let fn_name = &input.sig.ident;
     let fn_name_str = fn_name.to_string();
     let fn_block = &input.block;
+
+    // For unstable-test-framework, we generate a dummy #[test_case] const
+    // to satisfy the custom_test_frameworks requirement. The actual test
+    // discovery still happens via inventory.
+    #[cfg(feature = "unstable-test-framework")]
+    let test_case_marker = {
+        let marker_name = syn::Ident::new(
+            &format!("__TEST_CASE_MARKER_{}", fn_name).to_uppercase(),
+            fn_name.span(),
+        );
+        quote! {
+            #[test_case]
+            const #marker_name: () = ();
+        }
+    };
+
+    #[cfg(not(feature = "unstable-test-framework"))]
+    let test_case_marker = quote! {};
 
     let expanded = quote! {
         fn #fn_name() -> ::std::pin::Pin<::std::boxed::Box<dyn ::std::future::Future<Output = ()> + Send>> {
@@ -123,6 +157,8 @@ pub fn harness_test(_attr: TokenStream, item: TokenStream) -> TokenStream {
             name: #fn_name_str,
             func: #fn_name,
         });
+
+        #test_case_marker
     };
 
     expanded.into()

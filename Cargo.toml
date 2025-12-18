@@ -23,6 +23,7 @@ categories = ["asynchronous", "os::macos-apis"]
 [features]
 default = []
 criterion = ["dep:criterion"]
+unstable-test-framework = ["apple-main-macros/unstable-test-framework"]
 
 [dependencies]
 tokio = { workspace = true }
@@ -45,6 +46,10 @@ harness = false
 [[test]]
 name = "main_macro"
 harness = false
+
+[[test]]
+name = "unstable_framework"
+required-features = ["unstable-test-framework"]
 
 [[bench]]
 name = "runtime_init"

@@ -12,6 +12,10 @@ env:
 jobs:
   check:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        profile: [stable, nightly]
+    name: check (${{ matrix.profile }})
     steps:
       - uses: actions/checkout@v4
 
@@ -25,13 +29,17 @@ jobs:
         run: nix profile install nixpkgs#devenv
 
       - name: Check formatting
-        run: devenv shell cargo fmt --all -- --check
+        run: devenv --profile ${{ matrix.profile }} shell cargo fmt --all -- --check
 
       - name: Run clippy
-        run: devenv shell cargo clippy --workspace --all-targets -- -D warnings
+        run: devenv --profile ${{ matrix.profile }} shell cargo clippy --workspace --all-targets -- -D warnings
 
       - name: Run tests
-        run: devenv shell cargo test --workspace
+        run: devenv --profile ${{ matrix.profile }} shell cargo test --workspace
+
+      - name: Run unstable-test-framework tests (nightly only)
+        if: matrix.profile == 'nightly'
+        run: devenv --profile ${{ matrix.profile }} shell cargo test --features unstable-test-framework --test unstable_framework
 
       - name: Run benchmark smoke test
-        run: devenv shell cargo bench --features criterion --bench runtime_init -- --test
+        run: devenv --profile ${{ matrix.profile }} shell cargo bench --features criterion --bench runtime_init -- --test
